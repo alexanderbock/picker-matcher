@@ -1,0 +1,57 @@
+{
+  "pickers": [
+    {
+      "name": "Picker 1",
+      "email": "picker1@mail.abc",
+      "picks": [
+        "Pickee 1",
+        "Pickee 2"
+      ]
+    },
+    {
+      "name": "Picker 2",
+      "email": "picker2@mail.abc",
+      "picks": [
+        "Pickee 1",
+        "Pickee 3"
+      ]
+    },
+    {
+      "name": "Picker 3",
+      "email": "picker3@mail.abc",
+      "picks": [
+        "Pickee 1",
+        "Pickee 2",
+        "Pickee 3"
+      ]
+    }
+  ],
+  "pickees": [
+    {
+      "name": "Pickee 1",
+      "email": "pickee1@mail.def"
+    },
+    {
+      "name": "Pickee 2",
+      "email": "pickee2@mail.def"
+    },
+    {
+      "name": "Pickee 3",
+      "email": "pickee3@mail.def"
+    }
+  ],
+  "timeslots": [
+    {
+      "name": "10:00 - 10:15"
+    },
+    {
+      "name": "10:15 - 10:30"
+    },
+    {
+      "name": "10:30 - 10:45"
+    },
+    {
+      "name": "10:45 - 11:00"
+    }
+  ]
+}
