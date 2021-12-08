@@ -10,7 +10,7 @@
 #include <unordered_map>
 #include <vector>
 
-#pragma optimize ("", off)
+//#pragma optimize ("", off)
 
 struct Pickee {
 	uint8_t name = 0;  // Index into `Names`
@@ -85,72 +85,81 @@ std::vector<Day> generateDayPermutations() {
 
 
 	std::cout << "Generating indices...";
-	std::vector<uint64_t> it;
 	std::vector<uint64_t> max;
 	max.reserve(Pickers.size());
 	for (size_t i = 0; i < Pickers.size(); i += 1) {
 		const Picker& picker = Pickers[i];
 		const DaySchemaPermutations& perm = perms[&picker];
 		max.push_back(static_cast<uint64_t>(perm.size()));
-
-		it.push_back(static_cast<uint64_t>(0));
 	}
 
-	//std::mutex mutex;
+	std::mutex mutex;
 	std::vector<Day> result;
 
-	//std::vector<uint64_t> first;
-	//std::iota(first.begin(), first.end(), 0);
-	//std::for_each(
-	//	std::execution::par_unseq,
-	//	first.begin(), first.end(),
-	//	[&mutex, &result, it, &max](uint64_t) {
+	std::vector<uint64_t> first(max[0]);
+	std::iota(first.begin(), first.end(), 0);
+	std::for_each(
+		std::execution::par,
+		first.begin(), first.end(),
+		[&mutex, &result, &max, &perms](uint64_t idx) mutable {
+			std::vector<uint64_t> it;
+			for (size_t i = 0; i < Pickers.size(); i += 1) {
+				it.push_back(static_cast<uint64_t>(0));
+			}
 
-	//	}
-	//);
+			it[0] = idx;
+
+			Day day;
+			day.reserve(Pickers.size());
+
+			std::vector<Day> localResult;
+
+			ZoneScopedN("Permuting indices")
+			while (it[1] != max[1]) {
+				ZoneScopedN("Outer loop")
+				day.clear();
+
+				for (size_t j = 0; j < it.size(); j += 1) {
+					const int pickerIdx = static_cast<int>(j);
+					const uint64_t permIdx = it[j];
+
+					const Picker& picker = Pickers[pickerIdx];
+					const std::vector<const Pickee*>& permutation = perms[&picker][permIdx];
+
+					if (!isCompatibleWith(day, permutation)) {
+						++it[j];
+						break;
+					}
+
+					day.push_back(permutation);
+				}
+
+				if (day.size() == it.size()) {
+					//for (size_t j = 0; j < it.size(); j += 1) {
+					//	std::cout << int(it[j]) << ' ';
+					//}
+					//std::cout << '\n';
+					localResult.push_back(std::move(day));
+
+				}
+
+				++it[max.size() - 1];
+				for (int i = max.size() - 1; (i > 1) && it[i] >= (max[i] - 1); --i) {
+					ZoneScopedN("Inner loop")
+
+					it[i] = static_cast<uint64_t>(0);
+					++it[i - 1];
+				}
+			}
+
+			std::lock_guard g(mutex);
+			result.insert(result.end(), localResult.begin(), localResult.end());
+		}
+	);
 
 
 	{
-		Day day;
-		day.reserve(Pickers.size());
 
-		ZoneScopedN("Permuting indices")
-		while (it[0] != max[0]) {
-			ZoneScopedN("Outer loop")
-			day.clear();
-
-			for (size_t j = 0; j < it.size(); j += 1) {
-				const int pickerIdx = static_cast<int>(j);
-				const uint64_t permIdx = it[j];
-
-				const Picker& picker = Pickers[pickerIdx];
-				const std::vector<const Pickee*>& permutation = perms[&picker][permIdx];
-
-				if (!isCompatibleWith(day, permutation)) {
-					++it[j];
-					break;
-				}
-
-				day.push_back(permutation);
-			}
-
-			if (day.size() == it.size()) {
-				//for (size_t j = 0; j < it.size(); j += 1) {
-				//	std::cout << int(it[j]) << ' ';
-				//}
-				//std::cout << '\n';
-				result.push_back(std::move(day));
-
-			}
-
-			++it[max.size() - 1];
-			for (int i = max.size() - 1; (i > 0) && it[i] >= (max[i] - 1); --i) {
-				ZoneScopedN("Inner loop")
-
-				it[i] = static_cast<uint64_t>(0);
-				++it[i - 1];
-			}
-		}
 	}
 	std::cout << fmt::format("Done. ({} indices)\n", result.size());
 	return result;
