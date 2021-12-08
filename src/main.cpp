@@ -1,19 +1,25 @@
 #include <nlohmann/json.hpp>
 #include <fmt/format.h>
+#include <tracy.hpp>
+#include <execution>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <mutex>
+#include <memory_resource>
 #include <unordered_map>
 #include <vector>
 
+#pragma optimize ("", off)
+
 struct Pickee {
-	std::string name;
-	std::string email;
+	uint8_t name = 0;  // Index into `Names`
+	uint8_t email = 0; // Index into `Emails`
 };
 
 struct Picker {
-	std::string name;
-	std::string email;
+	uint8_t name = 0;  // Index into `Names`
+	uint8_t email = 0; // Index into `Emails`
 	std::vector<const Pickee*> picks;
 };
 
@@ -21,128 +27,139 @@ struct Timeslot {
 	std::string name;
 };
 
+std::vector<std::string> Names;
+std::vector<std::string> Emails;
+
+std::vector<Pickee> Pickees;
+std::vector<Picker> Pickers;
+std::vector<Timeslot> Timeslots;
+
 using DaySchema = std::vector<const Pickee*>;
 using Day = std::vector<DaySchema>;
 
-std::vector<Day> generateDayPermutations(const std::vector<Picker>& pickers,
-									     const std::vector<Timeslot>& timeslots)
-{
+bool isCompatibleWith(const Day& incompleteDay, const DaySchema& incoming) {
+	// Test if the pickees of the incoming schema have been used in the same slot in the
+	// day already
+	for (size_t i = 0; i < incoming.size(); i += 1) {
+		for (const DaySchema& ds : incompleteDay) {
+			if (incoming[i] && ds[i] && incoming[i] == ds[i]) {
+				return false;
+			}
+		}
+	}
+	return true;
+}
+
+std::vector<Day> generateDayPermutations() {
+	ZoneScoped
+
 	using DaySchemaPermutations = std::vector<DaySchema>;
 	std::unordered_map<const Picker*, DaySchemaPermutations> perms;
 	std::cout << "Generating permutations...";
 	uint64_t nPermutations = 0;
-	for (const Picker& picker : pickers) {
-		DaySchemaPermutations permutations;
+	{
+		ZoneScopedN("Generating permutations")
+		for (const Picker& picker : Pickers) {
+			ZoneScoped
 
-		// Generate base
-		DaySchema picks;
-		picks.resize(timeslots.size(), nullptr);
-		for (size_t j = 0; j < picker.picks.size(); j += 1) {
-			picks[j] = picker.picks[j];
+			DaySchemaPermutations permutations;
+
+			// Generate base
+			DaySchema picks;
+			picks.resize(Timeslots.size(), nullptr);
+			for (size_t j = 0; j < picker.picks.size(); j += 1) {
+				picks[j] = picker.picks[j];
+			}
+			std::sort(picks.begin(), picks.end());
+
+			do {
+				permutations.push_back(picks);
+			} while (std::next_permutation(picks.begin(), picks.end()));
+
+			nPermutations += permutations.size();
+			perms[&picker] = std::move(permutations);
 		}
-		std::sort(picks.begin(), picks.end());
-
-		do {
-			permutations.push_back(picks);
-		} while (std::next_permutation(picks.begin(), picks.end()));
-
-		nPermutations += permutations.size();
-		perms[&picker] = std::move(permutations);
 	}
 	std::cout << fmt::format("Done. ({} permutations)\n", nPermutations);
 
+
+
 	std::cout << "Generating indices...";
-	std::vector<std::vector<int>> iotas;
-	iotas.resize(pickers.size());
-	for (size_t i = 0; i < pickers.size(); i += 1) {
-		const Picker& picker = pickers[i];
+	std::vector<uint64_t> it;
+	std::vector<uint64_t> max;
+	max.reserve(Pickers.size());
+	for (size_t i = 0; i < Pickers.size(); i += 1) {
+		const Picker& picker = Pickers[i];
 		const DaySchemaPermutations& perm = perms[&picker];
-		iotas[i].resize(perm.size());
-		std::iota(iotas[i].begin(), iotas[i].end(), 0);
+		max.push_back(static_cast<uint64_t>(perm.size()));
+
+		it.push_back(static_cast<uint64_t>(0));
 	}
 
-	std::vector<std::vector<int>> indices;
-
-	// Initialize iterator vector
-	std::vector<std::vector<int>::const_iterator> it;
-	for (size_t i = 0; i < iotas.size(); i += 1) {
-		it.push_back(iotas[i].begin());
-	}
-
-	while (it[0] != iotas[0].end()) {
-		// process the pointed-to elements
-		std::vector<int> r;
-		for (std::vector<int>::const_iterator jj : it) {
-			r.push_back(*jj);
-		}
-		indices.push_back(std::move(r));
-
-		// the following increments the "odometer" by 1
-		++it[iotas.size() - 1];
-		for (int i = iotas.size() - 1; (i > 0) && (it[i] == iotas[i].end()); --i) {
-			it[i] = iotas[i].begin();
-			++it[i - 1];
-		}
-	}
-	std::cout << fmt::format("Done. ({} indices)\n", indices.size());
-
-	std::cout << "Applying permutations...";
+	//std::mutex mutex;
 	std::vector<Day> result;
-	result.reserve(indices.size());
-	for (const std::vector<int>& dayIdx : indices) {
+
+	//std::vector<uint64_t> first;
+	//std::iota(first.begin(), first.end(), 0);
+	//std::for_each(
+	//	std::execution::par_unseq,
+	//	first.begin(), first.end(),
+	//	[&mutex, &result, it, &max](uint64_t) {
+
+	//	}
+	//);
+
+
+	{
 		Day day;
-		day.reserve(pickers.size());
-		for (size_t i = 0; i < dayIdx.size(); i +=1 ) {
-			const int pickerIdx = static_cast<int>(i);
-			const int permIdx = dayIdx[i];
+		day.reserve(Pickers.size());
 
-			const Picker& picker = pickers[pickerIdx];
-			const std::vector<const Pickee*>& permutation = perms[&picker][permIdx];
-			day.push_back(permutation);
-		}
-		result.push_back(std::move(day));
-	}
-	std::cout << "Done.\n";
-	return result;
-}
+		ZoneScopedN("Permuting indices")
+		while (it[0] != max[0]) {
+			ZoneScopedN("Outer loop")
+			day.clear();
 
-bool hasDoubleBooking(const Day& day) {
-	assert(
-		std::all_of(
-			day.cbegin(), day.cend(),
-			[&day](const DaySchema& ds) { return ds.size() == day.front().size(); }
-		)
-	);
+			for (size_t j = 0; j < it.size(); j += 1) {
+				const int pickerIdx = static_cast<int>(j);
+				const uint64_t permIdx = it[j];
 
-	for (size_t i = 0; i < day.front().size(); i += 1) {
-		// Get the i-th Pickee out of every DaySchema
+				const Picker& picker = Pickers[pickerIdx];
+				const std::vector<const Pickee*>& permutation = perms[&picker][permIdx];
 
-		std::vector<const Pickee*> transpose;
-		transpose.reserve(day.front().size());
-		for (const DaySchema& ds : day) {
-			// We need to ignore the empty ones as they would otherwise trip the duplicate
-			// check below
-			if (ds[i]) {
-				transpose.push_back(ds[i]);
+				if (!isCompatibleWith(day, permutation)) {
+					++it[j];
+					break;
+				}
+
+				day.push_back(permutation);
+			}
+
+			if (day.size() == it.size()) {
+				//for (size_t j = 0; j < it.size(); j += 1) {
+				//	std::cout << int(it[j]) << ' ';
+				//}
+				//std::cout << '\n';
+				result.push_back(std::move(day));
+
+			}
+
+			++it[max.size() - 1];
+			for (int i = max.size() - 1; (i > 0) && it[i] >= (max[i] - 1); --i) {
+				ZoneScopedN("Inner loop")
+
+				it[i] = static_cast<uint64_t>(0);
+				++it[i - 1];
 			}
 		}
-
-		// We sort all of the values, and then check if there are two adjacent elements.
-		// If so, then we had a duplicate booking and we can eliminate the day
-		std::sort(transpose.begin(), transpose.end());
-		auto adjacent = std::adjacent_find(transpose.begin(), transpose.end());
-		if (adjacent != transpose.end()) {
-			return true;
-		}
 	}
-
-	// If we get this far, there have not been any duplicate entries 
-	return false;
+	std::cout << fmt::format("Done. ({} indices)\n", result.size());
+	return result;
 }
 
 using namespace nlohmann;
 
 int main(int argc, char** argv) {
+
 	//
 	// Load the data
 	//
@@ -167,29 +184,41 @@ int main(int argc, char** argv) {
 	//
 	// Parse the data
 	//
-	std::vector<Pickee> pickees;
 	for (const json& pickee : data.at("pickees")) {
 		Pickee p;
-		p.name = pickee.at("name").get<std::string>();
-		p.email = pickee.at("email").get<std::string>();
-		pickees.push_back(std::move(p));
+		std::string name = pickee.at("name").get<std::string>();
+		Names.push_back(name);
+		assert(Names.size() < std::numeric_limits<uint8_t>::max());
+		p.name = static_cast<uint8_t>(Names.size() - 1);
+		
+		std::string email = pickee.at("email").get<std::string>();
+		Emails.push_back(email);
+		assert(Emails.size() < std::numeric_limits<uint8_t>::max());
+		p.email = static_cast<uint8_t>(Emails.size() - 1);
+		Pickees.push_back(std::move(p));
 	}
 
-	std::vector<Picker> pickers;
 	for (const json& picker : data.at("pickers")) {
 		Picker p;
-		p.name = picker.at("name").get<std::string>();
-		p.email = picker.at("email").get<std::string>();
+		std::string name = picker.at("name").get<std::string>();
+		Names.push_back(name);
+		assert(Names.size() < std::numeric_limits<uint8_t>::max());
+		p.name = static_cast<uint8_t>(Names.size() - 1);
+
+		std::string email = picker.at("email").get<std::string>();
+		Emails.push_back(email);
+		assert(Emails.size() < std::numeric_limits<uint8_t>::max());
+		p.email = static_cast<uint8_t>(Emails.size() - 1);
 
 		std::vector<std::string> picks =
 			picker.at("picks").get<std::vector<std::string>>();
 		for (const std::string& pick : picks) {
 			const auto it = std::find_if(
-				pickees.cbegin(), pickees.cend(),
-				[&pick](const Pickee& p) { return pick == p.name; }
+				Pickees.cbegin(), Pickees.cend(),
+				[&pick](const Pickee& p) { return pick == Names[p.name]; }
 			);
 
-			if (it == pickees.cend()) {
+			if (it == Pickees.cend()) {
 				std::cerr <<
 					fmt::format("Could not find pick {} of picker {}\n", pick, p.name);
 				return EXIT_FAILURE;
@@ -198,22 +227,20 @@ int main(int argc, char** argv) {
 			p.picks.push_back(&*it);
 		}
 
-		pickers.push_back(std::move(p));
+		Pickers.push_back(std::move(p));
 	}
 
-	std::vector<Timeslot> timeslots;
 	for (const json& picker : data.at("timeslots")) {
 		Timeslot t;
 		t.name = picker.at("name").get<std::string>();
-		timeslots.push_back(std::move(t));
+		Timeslots.push_back(std::move(t));
 	}
 
 
 	//
 	// Generate all permutations of the days
 	//
-	std::vector<Day> days = generateDayPermutations(pickers, timeslots);
-	days.erase(std::remove_if(days.begin(), days.end(), hasDoubleBooking), days.end());
+	std::vector<Day> days = generateDayPermutations();
 
 
 

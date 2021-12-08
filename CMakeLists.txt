@@ -6,10 +6,12 @@ add_executable(
   src/main.cpp
 )
 
+option("ENABLE_TRACY" "Enable Tracy" OFF)
+
 target_compile_features(pickermatcher PUBLIC cxx_std_20)
 target_compile_options(pickermatcher PUBLIC
   "/MP"          # Multi-threading support
-  "/ZI"          # Edit and continue support
+  # "/ZI"          # Edit and continue support
   "/permissive-"
   "/W4"          # Highest warning level
   "/w44062"   # enumerator 'identifier' in a switch of enum 'enumeration' is not handled
@@ -43,4 +45,4 @@ target_compile_options(pickermatcher PUBLIC
 target_include_directories(pickermatcher PUBLIC src)
 
 add_subdirectory(ext)
-target_link_libraries(pickermatcher PUBLIC fmt json)
+target_link_libraries(pickermatcher PUBLIC fmt json tracy)
